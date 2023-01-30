@@ -11,8 +11,8 @@ Jupyter session on a server with,
 
 where 8904 is a random high port number.
 
-Then, copy the link it provides and use it with `rjy new <link>` to
-register this session with your local computer,
+Then, copy the link it provides and use it with `rjy new <link>` *and your 
+remote server hostname* to register this session with your local computer,
 
     $ rjy new http://localhost:8904/lab?token=b1fc6[...]b7a40 remote
     INFO:rjy:connected new session remote:8904
