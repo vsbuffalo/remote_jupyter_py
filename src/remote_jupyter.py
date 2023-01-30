@@ -1,25 +1,41 @@
+"""
+rjy: remote jupyter session management
+"""
 import re
-from pathlib import Path
 import os
 from os.path import expanduser, join, exists, isdir
+from pathlib import Path
 import json
-import tomllib
 import shlex
-from subprocess import Popen, getoutput, PIPE
+from subprocess import Popen, PIPE
 import logging
 import defopt
 from tabulate import tabulate
 
+logger = logging.getLogger("rjy")
+
 EX = "http://localhost:8904/lab?token=b1fc61e2[...]7b7a40"
 
 
-TUNNEL_RE = re.compile(r"ssh -Y -N -L (?P<lhost>\w+):(?P<port1>\d+):(?P<lhost2>\w+):(?P<port2>\d+) (?P<rhost>\w+)")
-LINK_RE  = re.compile(r"http://(?P<lhost>localhost|127\\.0\\.0\\.1):(?P<port>\d+)/lab\?token=(?P<key>[0-9a-fA-F]+)")
-LINK_STR  = "http://{lhost}:{port}?token={token}"
+TUNNEL_RE = re.compile(r"ssh -Y -N -L (?P<lhost>\w+):(?P<port1>\d+):"
+                       r"(?P<lhost2>\w+):(?P<port2>\d+) (?P<rhost>\w+)")
+
+LINK_RE = re.compile(r"http://(?P<lhost>localhost|127\\.0\\.0\\.1):"
+                     r"(?P<port>\d+)/lab\?token=(?P<key>[0-9a-fA-F]+)")
+
+LINK_STR = "http://{lhost}:{port}?token={token}"
+FOOTER = """\
+status types:
+
+  - connected: a registered session is currently connected
+  - disconnected: a session is registered, but currently connected
+  - unregistered: a session is connected, but not registered with rjy
+"""
 
 
 def make_key(remote, port):
-    return f"{remote}::{port}"
+    return f"{remote}:{port}"
+
 
 def parse_ps_cmd(x):
     out = []
@@ -33,8 +49,6 @@ def parse_ps_cmd(x):
 
 
 def parse_juypter_link(link):
-    #http://localhost:8904/lab?token=b1fc61e2789f1cc55ea7b7c28a287d5719c4ce684f7b7a40
-    # or http://127.0.0.1:8904/lab?token=b1fc61e2789f1cc55ea7b7c28a287d5719c4ce684f7b7a40
     mtch = LINK_RE.match(link)
     assert mtch is not None, "invalid link format"
     lhost, port, token = mtch.groups()
@@ -61,8 +75,10 @@ def find_open_tunnels():
         mtch = TUNNEL_RE.match(cmd)
         if mtch is not None:
             lhost1, port1, lhost2, port2, remote = mtch.groups()
-            assert lhost1 == lhost2, f"tunnel localhosts do not match ({lhost1}≠{lhost2})!"
-            assert port1 == port2, f"tunnel ports do not match ({port1}≠{port2})!"
+            msg = "tunnel {thing} do not match ({a}≠{b})!"
+            assert lhost1 == lhost2, msg.format(thing='localhosts',
+                                                a=lhost1, b=lhost2)
+            assert port1 == port2,  msg.format(thing='ports', a=port1, b=port2)
             matches[pid] = (remote, int(port1))
     return matches
 
@@ -84,6 +100,7 @@ class SSHTunnel(object):
     def start(self):
         if self.is_alive():
             msg = f"session is currently alive for {self}, cannot start"
+            logger.info(msg)
             return True
         host, port = self.host, self.port
         cmd = f"ssh -Y -N -L localhost:{port}:localhost:{port} {host} &"
@@ -109,6 +126,7 @@ class Sessions(object):
     """
     A collection of sessions.
     """
+
     def __init__(self):
         self.sessions = {}  # what to write to the cache
         self.cached_sessions = {}  # from the file
@@ -128,17 +146,19 @@ class Sessions(object):
     def check_valid(self):
         home_exists = exists(self.home_dir) and isdir(self.home_dir)
         if not home_exists:
-            assert not exists(self.home_dir) # something else is wrong
-            logging.info("creating ~/.remote_jupyter")
+            assert not exists(self.home_dir)  # something else is wrong
+            logger.info("creating ~/.remote_jupyter")
             self._make_homedir()
+        if not exists(self.sessions_file):
+            Path(self.sessions_file).touch()
 
     def load_cached_sessions(self):
         """
         Load the expected sessions.
         """
         self.check_valid()
-        home_dir = self.home_dir
-        if not exists(self.sessions_file):
+        empty_sessions = os.path.getsize(self.sessions_file) == 0
+        if not exists(self.sessions_file) or empty_sessions:
             self.cached_sessions = {}
             return {}
 
@@ -157,7 +177,7 @@ class Sessions(object):
 
     def compare_sessions(self):
         """
-        Compare what's alive and what's cached.
+        Compare what's alive and what's cached, output a table.
         """
         self.check_valid()
         alive = self.load_alive()
@@ -171,7 +191,7 @@ class Sessions(object):
             if key in alive and key in cached:
                 status = 'conected'
             elif key in alive and key not in cached:
-                status = 'unknown'
+                status = 'unregistered'
             elif key not in alive and key in cached:
                 status = 'disconnected'
             else:
@@ -182,22 +202,26 @@ class Sessions(object):
             if key in cached:
                 remote_cached, port_cached, token, pid = cached[key]
 
-
             # validate state
             if port is not None and port_cached is not None:
                 assert port == int(port_cached)
             if remote is not None and remote_cached is not None:
                 assert remote == remote_cached
+
+            # if status is disconnected, the pid is no longer accurate
+            pid = None if status == 'disconnected' else pid
+
             # make the link if possible
             link = None
             if token is not None:
-                link = LINK_STR.format(lhost='localhost', port=port, token=token)
+                link = LINK_STR.format(lhost='localhost',
+                                       port=port, token=token)
             connected_rows.append((key, pid, remote, port, status, link))
 
-
-        tab = tabulate(connected_rows, 
-                       headers=['key', 'pid', 'remote', 'port', 'status', 'link'])
-        print(tab)
+        header = ['key', 'pid', 'remote', 'port', 'status', 'link']
+        tab = tabulate(connected_rows, headers=header)
+        print("\n" + tab)
+        print("\n" + FOOTER)
 
     @property
     def sessions_file(self):
@@ -212,7 +236,8 @@ class Sessions(object):
         if key is not None:
             assert key in self.cached_sessions
             if key in alive:
-                logging.info(f"the key {key} was found to already by connected!")
+                msg = f"the key {key} was found to already by connected!"
+                logger.info(msg)
                 return
 
         # reconnect everything in cached
@@ -223,26 +248,32 @@ class Sessions(object):
             if cached_key in alive:
                 # already running...
                 if verbose:
-                    logging.info(f"cached session {cached_key} is already connected...")
+                    msg = (f"cached session {cached_key} is "
+                           "already connected...")
+                    logger.info(msg)
                 continue
             host, port, token, pid = values
             tunnel = SSHTunnel(host, port, token)
-            pid = tunnel.start()
+            tunnel.start()
+            logger.info(f"reconnected session {host}:{port}")
 
             # register it
             self.sessions[cached_key] = tunnel
             self.save()
 
-
     def drop(self, key):
         """
         Drop a session (from the cache).
         """
+        self.check_valid()
+        self.load_cached_sessions()
         self.sessions = {}
-        pass
-
-    def track(self, key):
-        pass
+        for cache_key, session in self.cached_sessions.items():
+            if key != cache_key:
+                self.sessions[cache_key] = session
+            else:
+                logger.info(f"dropping session {key} from registration")
+        self.save()
 
     def save(self):
         """
@@ -251,25 +282,20 @@ class Sessions(object):
             dumped = {k: v.dump() for k, v in self.sessions.items()}
             json.dump(dumped, f)
 
-    def clear_stale(self):
-        pass
-
-    def kill(self, key=None, pid=None):
+    def disconnect(self, key=None, pid=None):
         alive = find_open_tunnels()
         for pid, session in alive.items():
             remote, port = session
             if pid == pid or key == make_key(remote, port):
-                print(f"killing {pid} for {remote}:{port}")
+                logger.info(f"disconnecting {pid} for {remote}:{port}")
                 os.kill(int(pid), 2)
-
-
 
     def killall(self):
         "Kill all found funnels."
         alive = find_open_tunnels()
         for pid, session in alive.items():
             remote, port = session
-            print(f"killing {pid} for {remote}:{port}")
+            logger.info(f"killing {pid} for {remote}:{port}")
             os.kill(int(pid), 2)
 
     def new(self, link, remote):
@@ -280,44 +306,60 @@ class Sessions(object):
         port, token = parse_juypter_link(link)
         new_key = make_key(remote, port)
         if new_key in self.alive:
-            # TODO check link
-            raise ValueError(f"tunnel {remote}:{port} already exists!")
+            logger.warning(f"tunnel {remote}:{port} already exists!")
+            return
 
         if new_key in self.cached_sessions:
-            logging.info(f"tunnel {remote}:{port} is cached, but not alive... reconnecting.")
+            msg = (f"tunnel {remote}:{port} is cached, but not "
+                   "alive... reconnecting.")
+            logger.info(msg)
 
         # create new tunnel
         tunnel = SSHTunnel(remote, port, token)
-        pid = tunnel.start()
+        tunnel.start()
+        logger.info(f"connected new session {remote}:{port}")
 
         # register it
         self.sessions[new_key] = tunnel
         self.save()
 
 
-  
-def reconnect(key: str=None, *, verbose: bool=True):
+def reconnect(key: str = None, *, verbose: bool = True):
     """
-    key: the key to reconnect (if not specified, reconnect all)
+    Reconnect the given key or all if key not specified.
+
+    key: the key to reconnect (if not set, reconnects all cached).
     verbose: be verbose
     """
     s = Sessions()
     s.reconnect(key)
 
-   
- 
-def kill(key: str, *, pid: int=None):
+
+def drop(key: str):
     """
-    Kill specified pid.
+    Drop a session that's tracked in the cache.
+
+    key: the key to drop
     """
     s = Sessions()
-    s.kill(key=key, pid=pid)
+    s.drop(key=key)
 
-       
+
+def disconnect(key: str = None, *, pid: int = None):
+    """
+    disconnect specified process ID or key (specify either).
+
+    key: the key to disconnect.
+    pid: the PIDt to disconnect.
+
+    """
+    s = Sessions()
+    s.disconnect(key=key, pid=pid)
+
 
 def killall():
     """
-    Kill all found tunnels.
+    Kill all found running tunnels.
     """
     s = Sessions()
     s.killall()
@@ -334,15 +376,17 @@ def new(link: str, remote: str):
     s.new(link, remote)
 
 
-def list():
+def list_sessions():
     """
     Check and list all tunnel sessions, both found and cached.
     """
     s = Sessions()
     s.compare_sessions()
 
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    defopt.run([list, new, killall, kill, reconnect])
 
-
+def main():
+    logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
+    defopt.run({'list': list_sessions, 'new': new,
+                'killall': killall,
+                'dc': disconnect,
+                'drop': drop, 'rc': reconnect})
