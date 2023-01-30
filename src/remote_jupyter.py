@@ -1,5 +1,10 @@
 """
 rjy: remote jupyter session management
+
+Parses Jupyter links like,
+
+http://localhost:8904/lab?token=b1fc61e2[...]7b7a40
+
 """
 import re
 import os
@@ -14,8 +19,6 @@ from tabulate import tabulate
 
 logger = logging.getLogger("rjy")
 
-EX = "http://localhost:8904/lab?token=b1fc61e2[...]7b7a40"
-
 
 TUNNEL_RE = re.compile(r"ssh -Y -N -L (?P<lhost>\w+):(?P<port1>\d+):"
                        r"(?P<lhost2>\w+):(?P<port2>\d+) (?P<rhost>\w+)")
@@ -24,13 +27,33 @@ LINK_RE = re.compile(r"http://(?P<lhost>localhost|127\\.0\\.0\\.1):"
                      r"(?P<port>\d+)/lab\?token=(?P<key>[0-9a-fA-F]+)")
 
 LINK_STR = "http://{lhost}:{port}?token={token}"
-FOOTER = """\
-status types:
 
-  - connected: a registered session is currently connected
-  - disconnected: a session is registered, but currently connected
-  - unregistered: a session is connected, but not registered with rjy
-"""
+TERMCOLS = {
+  'yellow':    '\033[93m',
+  'red':       '\033[91m',
+  'green':      '\033[92m',
+  'end':       '\033[0m',
+  'bold':      '\033[1m',
+  'underline': '\033[4m'
+}
+
+
+def color(x, color):
+    col_code = TERMCOLS[color]
+    end = TERMCOLS['end']
+    return f"{col_code}{x}{end}"
+
+
+def warn(x):
+    return color(x, 'yellow')
+
+
+def okay(x):
+    return color(x, 'green')
+
+
+def fail(x):
+    return color(x, 'red')
 
 
 def make_key(remote, port):
@@ -186,14 +209,18 @@ class Sessions(object):
         all_keys = set(alive).union(set(cached))
 
         connected_rows = []
+        pretty_status = None
         for key in all_keys:
             pid = None
             if key in alive and key in cached:
-                status = 'conected'
+                status = 'connected'
+                pretty_status = okay(status)
             elif key in alive and key not in cached:
                 status = 'unregistered'
+                pretty_status = warn(status)
             elif key not in alive and key in cached:
                 status = 'disconnected'
+                pretty_status = fail(status)
             else:
                 raise ValueError("invalid state")
 
@@ -216,12 +243,14 @@ class Sessions(object):
             if token is not None:
                 link = LINK_STR.format(lhost='localhost',
                                        port=port, token=token)
+
+            if pretty_status is not None:
+                status = pretty_status
             connected_rows.append((key, pid, remote, port, status, link))
 
-        header = ['key', 'pid', 'remote', 'port', 'status', 'link']
+        header = ['key', 'pid', 'host', 'port', 'status', 'link']
         tab = tabulate(connected_rows, headers=header)
-        print("\n" + tab)
-        print("\n" + FOOTER)
+        print("\n" + tab + "\n")
 
     @property
     def sessions_file(self):
@@ -328,8 +357,8 @@ def reconnect(key: str = None, *, verbose: bool = True):
     """
     Reconnect the given key or all if key not specified.
 
-    key: the key to reconnect (if not set, reconnects all cached).
-    verbose: be verbose
+    :param key: the key to reconnect (if not set, reconnects all cached).
+    :param verbose: be verbose
     """
     s = Sessions()
     s.reconnect(key)
@@ -339,7 +368,7 @@ def drop(key: str):
     """
     Drop a session that's tracked in the cache.
 
-    key: the key to drop
+    :param key: the key to drop
     """
     s = Sessions()
     s.drop(key=key)
@@ -349,8 +378,8 @@ def disconnect(key: str = None, *, pid: int = None):
     """
     disconnect specified process ID or key (specify either).
 
-    key: the key to disconnect.
-    pid: the PIDt to disconnect.
+    :param key: the key to disconnect.
+    :param pid: the PIDt to disconnect.
 
     """
     s = Sessions()
@@ -369,8 +398,8 @@ def new(link: str, remote: str):
     f"""
     Initiate a new session from a remote link.
 
-    link: the link from the Jupyter session, e.g. {EX}
-    remote: the hostname or IP of the remote server
+    :param link: the link from the Jupyter session, e.g. {EX}
+    :param remote: the hostname or IP of the remote server
     """
     s = Sessions()
     s.new(link, remote)
@@ -378,15 +407,24 @@ def new(link: str, remote: str):
 
 def list_sessions():
     """
-    Check and list all tunnel sessions, both found and cached.
+    Check and list all tunnel sessions, both found and cached. The
+    follow are the status types:
+
+    1. connected: a registered session is currently connected
+    2. disconnected: a session is registered, but currently disconnected
+    3. unregistered: a session is connected, but not registered with rjy
     """
     s = Sessions()
     s.compare_sessions()
 
 
 def main():
-    logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
-    defopt.run({'list': list_sessions, 'new': new,
+    logging.basicConfig(level=logging.INFO,
+                        format='[%(levelname)s] %(message)s')
+
+    defopt.run({'list': list_sessions,
+                'new': new,
                 'killall': killall,
                 'dc': disconnect,
-                'drop': drop, 'rc': reconnect})
+                'drop': drop,
+                'rc': reconnect})

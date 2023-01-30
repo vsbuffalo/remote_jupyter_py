@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='remote_jupyter',
-    version='0.1dev',
+    version='0.1',
     license='BSD',
     long_description=open('README.md').read(),
     entry_points={
