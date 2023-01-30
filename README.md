@@ -30,12 +30,6 @@ is with `rjy list`:
     -----------  -----  ------  ------  --------  -------------------------------------------
     sesame:8904  37041  remote    8904  conected  http://localhost:8904?token=b1fc6[...]b7a40
     
-    status types:
-    
-      - connected: a registered session is currently connected
-      - disconnected: a session is registered, but currently connected
-      - unregistered: a session is connected, but not registered with rjy
-
 Most good terminals will allow you to directly click this link (e.g.
 in iTerm2 on Mac, if you hold `⌘` and hover over a link, it will
 become clickable).
@@ -58,13 +52,6 @@ Now we can see it's disconnected:
     -----------  -----  ------  ------  ------------  -------------------------------------------
     sesame:8904                         disconnected  http://localhost:None?token=b1fc6[...]b7a40
     
-    status types:
-    
-      - connected: a registered session is currently connected
-      - disconnected: a session is registered, but currently connected
-      - unregistered: a session is connected, but not registered with rjy
-    
-
 We can reconnect with `rjy rc`. Without a key, everything registered is 
 reconnected. With a key, only that session is.
 
@@ -79,13 +66,6 @@ Now if we check,
     -----------  -----  ------  ------  --------  -------------------------------------------
     sesame:8904  37162  sesame    8904  conected  http://localhost:8904?token=b1fc6[...]b7a40
     
-    status types:
-    
-      - connected: a registered session is currently connected
-      - disconnected: a session is registered, but currently connected
-      - unregistered: a session is connected, but not registered with rjy
-    
-
 it's reconnected as expected. Finally, to drop a session from the registered cache,
 use `rjy drop <key>`:
 
