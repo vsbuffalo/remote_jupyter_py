@@ -1,10 +1,5 @@
 """
 rjy: remote jupyter session management
-
-Parses Jupyter links like,
-
-http://localhost:8904/lab?token=b1fc61e2[...]7b7a40
-
 """
 import re
 import os
@@ -19,12 +14,14 @@ from tabulate import tabulate
 
 logger = logging.getLogger("rjy")
 
+# example link for doc
+EX = "http://localhost:8904/lab?token=b1fc61e2[...]7b7a40"
 
 TUNNEL_RE = re.compile(r"ssh -Y -N -L (?P<lhost>\w+):(?P<port1>\d+):"
                        r"(?P<lhost2>\w+):(?P<port2>\d+) (?P<rhost>\w+)")
 
-LINK_RE = re.compile(r"http://(?P<lhost>localhost|127\\.0\\.0\\.1):"
-                     r"(?P<port>\d+)/lab\?token=(?P<key>[0-9a-fA-F]+)")
+LINK_RE = re.compile(r"http://(?P<lhost>localhost|[\d.]+):(?P<port>\d+)"
+                     r"/(lab)?\\?\?token\\?=(?P<token>[0-9a-fA-F]+)")
 
 LINK_STR = "http://{lhost}:{port}?token={token}"
 
@@ -74,7 +71,8 @@ def parse_ps_cmd(x):
 def parse_juypter_link(link):
     mtch = LINK_RE.match(link)
     assert mtch is not None, "invalid link format"
-    lhost, port, token = mtch.groups()
+    grps = mtch.groupdict()
+    lhost, port, token = grps['lhost'], grps['port'], grps['token']
     assert lhost in ('localhost', '127.0.0.1'), "invalid localhost"
     return port, token
 

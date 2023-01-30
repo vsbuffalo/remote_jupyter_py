@@ -1,5 +1,8 @@
 # Remote Jupyter Session Management Tool
 
+![a screenshot of the rjy command line tool](https://github.com/vsbuffalo/remote_jupyter/blob/main/screenshot.png?raw=true)
+
+
 `rjy` manages SSH tunneling for working with Jupyter 
 notebooks and lab instances over SSH. First, create a remote 
 Jupyter session on a server with,
