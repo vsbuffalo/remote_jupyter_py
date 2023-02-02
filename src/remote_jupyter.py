@@ -295,6 +295,17 @@ class Sessions(object):
         self.check_valid()
         self.load_cached_sessions()
         self.sessions = {}
+
+        all_keys = self.cached_sessions.keys()
+        if not len(all_keys):
+            raise ValueError("no cashed sessions found.")
+
+        if key not in all_keys:
+            keys_str = ','.join(all_keys)
+            msg = (f"{key} is not in the cached session!\n"
+                   f"Did you mistype it? Available keys: {keys_str}")
+            raise ValueError(msg)
+
         for cache_key, session in self.cached_sessions.items():
             if key != cache_key:
                 self.sessions[cache_key] = session
